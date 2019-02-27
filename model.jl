@@ -2,14 +2,7 @@ function actor(x, m)
     z1 = leakyrelu.(m["W"][1]*x .+ m["b"][1])
     z2 = leakyrelu.(m["W"][2]*z1 .+ m["b"][2])
     z3 = m["W"][3]*z2 .+ m["b"][3]
-    p = softmax(z3.data)
-
-    action = wsample(p[:])
-    #action = argmax(p[:])
-    #if rand() < 0.1
-    #    action = rand(1:4)
-    #end
-    return z3, p, action
+    return z3
 end
 
 function critic(x, m)
