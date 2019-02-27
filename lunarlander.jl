@@ -4,18 +4,12 @@ using LinearAlgebra
 using Gym
 import JLD
 include("model.jl")
-
-function normalize_r(r)
-    r .-= mean(r)
-    r ./= std(r)
-    return r
-end
+include("common.jl")
 
 function train(λ, Nepisodes)
     env = GymEnv("LunarLander-v2")
     #model=JLD.load("model.jld"); opt=JLD.load("opt.jld")
-    model, opt = initmodel()
-    #model_frozen=deepcopy(model)
+    model, opt = actorparams()
 
     maxt=1000
     backdecay = zeros(1,maxt)
@@ -39,7 +33,7 @@ function train(λ, Nepisodes)
         while !terminal
             t+=1
             #interact
-            q, p, action = policy(x, model)
+            q, p, action = actor(x, model)
             x_next, reward, terminal, information = step!(env, action-1)
 
             #store
@@ -55,7 +49,7 @@ function train(λ, Nepisodes)
 
         normalized_decayed_sumreward = normalize_r(decayed_sumreward[1:t])
 
-        qs, ps, _ = policy(xs[:,1:t], model)
+        qs, ps, _ = actor(xs[:,1:t], model)
         neglogprob = -sum(actions_onehot[:,1:t] .* logsoftmax(qs), dims=1) #treat picked actions as target of softmax output
         #loss = mean(neglogprob .* decayed_sumreward[1:t]') #multiply by some "score" or "advantage" function, in this case decayed sumreward
         loss = mean(neglogprob .* normalized_decayed_sumreward')
@@ -74,7 +68,7 @@ function train(λ, Nepisodes)
 end
 
 function main()
-    @show λ = 0.999 #reward decay aka discount
+    @show λ = 0.99 #reward decay aka discount
     Nepisodes=50000
     train(λ, Nepisodes)
 end
