@@ -1,9 +1,3 @@
-function normalize_r(r)
-    r .-= mean(r)
-    r ./= std(r)
-    return r
-end
-
 function adam!(θ, ∇, m, v, αᵪ, β₁, β₂, ϵ)
     #ADAM optimizer. see (Kingma & Ba, 2017) https://arxiv.org/pdf/1412.6980v9
     @. m = β₁*m + (1-β₁)*∇
@@ -25,6 +19,8 @@ function adjust!(opt, model, s)
     nothing
 end
 
+xent(t, z) = -sum(t .* logsoftmax(z), dims=1)
+
 xavier(a,b) = sqrt(0.5*(a+b))
 
 function haar(d)
@@ -34,3 +30,23 @@ function haar(d)
     return W
 end
 
+function discount(x, γ)
+    #a more descriptive name would be decayed sum of future values
+    T = length(x)
+    discounted_sumx = zeros(1,T)
+    running_add = 0
+    for t = T:-1:1
+        running_add = γ*running_add + x[t]
+        discounted_sumx[t] = running_add
+    end
+    return discounted_sumx
+end
+
+function index2onehot(x, d=4)
+    T = length(x)
+    onehot = zeros(d, T)
+    for t = 1:T
+        onehot[x[t],t]=1.0
+    end
+    return onehot
+end

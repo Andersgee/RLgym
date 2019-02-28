@@ -6,95 +6,68 @@ import JLD
 include("model.jl")
 include("common.jl")
 
-function train(λ, Nepisodes)
+function train(γ)
     env = GymEnv("LunarLander-v2")
-    #model=JLD.load("model.jld"); opt=JLD.load("opt.jld")
     amodel, aopt = actorparams()
     cmodel, copt = criticparams()
 
-    maxt=1000
-    backdecay = zeros(1,maxt)
-    rewards = zeros(1,maxt)
-    decayed_sumreward = zeros(1,maxt)
-    xs = zeros(8,maxt)
-    qs = zeros(4,maxt)
-    actions_onehot = zeros(4,maxt)
+    sumreward_ema = 0
+    episode = 0
+    while true
+        episode += 1
 
-    sumreward=zeros(Nepisodes)
-
-    entropy_β=0.01 #determines how important the loss for uncertainty of actor is
-
-    for episode=1:Nepisodes
+        #generate a "replay" using the current actor
+        xs=[]
+        actions=[]
+        rewards=[]
         x = reset!(env)
-        fill!(backdecay, 0.0)
-        fill!(xs, 0.0)
-        fill!(actions_onehot, 0.0)
-        fill!(decayed_sumreward, 0.0)
-        
-        t=0
-        terminal=false
-        while !terminal
-            t+=1
-            #interact
+        while true
             logitp = actor(x, amodel)
             action = wsample(softmax(logitp.data)[:])
-            #action = argmax(softmax(logitp.data)[:])
-            x_next, reward, terminal, information = step!(env, action-1)
-
-            #store "replay"
-            xs[:,t] = x
-            actions_onehot[action,t] = 1.0
-
-            backdecay .*= λ; backdecay[t] = 1.0
-            decayed_sumreward += reward.*backdecay #assign this reward to all visited states but with decay backwards
-
-            sumreward[episode] += reward #for debugging
-
-            #move
+            x_next, reward, done, information = step!(env, action-1)
+            push!(xs, x)
+            push!(actions, action)
+            push!(rewards, reward)
             x = x_next
+            if done; break; end
         end
+        sumreward_ema = 0.99*sumreward_ema + 0.01*sum(rewards)
 
-        #now do supervised learning on the stored data
-        x = xs[:,1:t] #visited states (input)
-        Rs = decayed_sumreward[:,1:t] #target of critic is actual sum of rewards (decayed) recieved after that state was visited
-        target = actions_onehot[:,1:t] #target of actor is just the picked actions, but each loss will be weighted by some score/advantage value which might be negative
+        #now do supervised learning on the replay
+        x = hcat(xs...)
+        t_critic = discount(hcat(rewards...), γ)
+        t_actor = index2onehot(hcat(actions...), 4)
 
-        #handle critic
         qs = critic(x, cmodel)
-        criticloss = mean((qs .- Rs).^2) #MSE for linear output
+        criticloss = 0.5*mean((qs.-t_critic).^2) #MSE loss
 
-        #handle actor
         logitps = actor(x, amodel)
-        actorloss = -sum(target .* logsoftmax(logitps), dims=1) #crossentropy for softmax output
-        actorloss_weighted = mean(actorloss .* (Rs .- qs.data)) #but weighted (this particular weighting is called "advantage" but there are other ways of choosing this score)
-        #note for later: can use negativeAdvantage=qs-Rs here (which is used in critic MSE) if we use logprob instead of neglogprob..
-        #less clear imho but more "elegant" since the two minus signs cancel
+        actorloss = mean(xent(t_actor, logitps) .* (t_critic .- qs.data)) #crossentropy loss, but multiplied by an advantage score (in this case what we got, minus what critic thought we would get)
 
-        #an extra "entropy" (crossentropy for actor using its output probabilities as target instead of picked actions)
-        #this loss is low if actor is certain. so encourage exploration by subtracting this loss..
-        actor_entropyloss = entropy_β * mean(-sum(softmax(logitps) .* logsoftmax(logitps), dims=1))
+        actor_actionentropy = mean(xent(softmax(logitps), logitps)) #an extra entropy value for actor output probabilities, subtract this to artificially decrease loss when actor is unsure (encourages exploration)
+        loss = criticloss + actorloss - 0.01*actor_actionentropy
 
-        loss = 0.5*criticloss + actorloss_weighted - actor_entropyloss
+        #backprop and adjust
         Flux.Tracker.back!(loss)
         adjust!(aopt, amodel, episode)
         adjust!(copt, cmodel, episode)
 
+        #info
         if episode%200==0
-            println("episode: ",episode,"/",Nepisodes," (saved checkpoint)")
-            println("since last mean(sumreward): ",mean(sumreward[episode-199:episode]))
-
+            println("episode: ",episode," sumreward_ema: ",round(sumreward_ema, digits=2), " (saving models)")
             JLD.save("amodel.jld", amodel)
             JLD.save("cmodel.jld", cmodel)
-            #JLD.save("opt.jld", opt)
+            if sumreward_ema>200
+                println("Condition met. consider it solved")
+                break
+            end
         end
     end
-    nothing
 end
 
 function main()
-    @show λ = 0.99 #reward decay aka discount
-    Nepisodes=50000
-    train(λ, Nepisodes)
+    γ = 0.99
+    train(γ)
 end
 
 main()

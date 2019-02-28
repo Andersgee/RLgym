@@ -12,7 +12,6 @@ function critic(x, m)
     return z3
 end
 
-#https://github.com/gabrielgarza/openai-gym-policy-gradient/blob/master/policy_gradient_layers.py
 function actorparams()
     L = [8,10,10,4]
 
