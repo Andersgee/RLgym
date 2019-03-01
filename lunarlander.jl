@@ -6,7 +6,7 @@ import JLD
 include("model.jl")
 include("common.jl")
 
-function train(γ)
+function train(γ, λ)
     env = GymEnv("LunarLander-v2")
     amodel, aopt = actorparams()
     cmodel, copt = criticparams()
@@ -40,9 +40,11 @@ function train(γ)
 
         qs = critic(x, cmodel)
         criticloss = 0.5*mean((qs.-t_critic).^2) #MSE loss
-
+        
         logitps = actor(x, amodel)
-        actorloss = mean(xent(t_actor, logitps) .* (t_critic .- qs.data)) #crossentropy loss, but multiplied by an advantage score (in this case what we got, minus what critic thought we would get)
+        #actorloss = mean(xent(t_actor, logitps) .* (t_critic .- qs.data)) #crossentropy loss, but multiplied by an advantage score (in this case what we got, minus what critic thought we would get)
+        advantage = GAE(rewards, qs.data, γ, λ)
+        actorloss = mean(xent(t_actor, logitps) .* normalize(advantage))
 
         actor_actionentropy = mean(xent(softmax(logitps), logitps)) #an extra entropy value for actor output probabilities, subtract this to artificially decrease loss when actor is unsure (encourages exploration)
         loss = criticloss + actorloss - 0.01*actor_actionentropy
@@ -67,7 +69,8 @@ end
 
 function main()
     γ = 0.99
-    train(γ)
+    λ = 0.8
+    train(γ, λ)
 end
 
 main()

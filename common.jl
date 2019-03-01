@@ -23,11 +23,29 @@ xent(t, z) = -sum(t .* logsoftmax(z), dims=1)
 
 xavier(a,b) = sqrt(0.5*(a+b))
 
+function GAE(rewards, qs, γ, λ)
+    #Generalized Advantage Estimation. see (Schulman et al., 2018) https://arxiv.org/abs/1506.02438
+    #in summary:
+    #λ=0 gives A=reward+γ*qs[t+1]-qs[t] (low variance, high bias)
+    #λ=1 gives A=discount(rewards, γ)-qs (high variance, zero bias)
+    #so λ provides a way to adjust bias-variance tradeoff
+    TDerrors = [rewards[t] + γ*qs[t+1] - qs[t] for t=1:length(qs)-1]
+    push!(TDerrors, rewards[end]-qs[end])
+    A = discount(hcat(TDerrors...), λ*γ)
+    return A
+end
+
 function haar(d)
     #initial random orthogonal see (Saxe et al., 2014) https://arxiv.org/abs/1312.6120
     Q,R = qr(randn(d,d))
     W=Q*Diagonal(sign.(diag(R)));
     return W
+end
+
+function normalize(x)
+    x = x .- mean(x)
+    x = x ./ std(x)
+    return x
 end
 
 function discount(x, γ)
@@ -42,7 +60,7 @@ function discount(x, γ)
     return discounted_sumx
 end
 
-function index2onehot(x, d=4)
+function index2onehot(x, d)
     T = length(x)
     onehot = zeros(d, T)
     for t = 1:T
